@@ -7,6 +7,7 @@ from typing import Optional
 from . import audit
 from .core import baseline
 from .core import plugins
+from .core import staged
 from .core.log import log
 from .core.scan import get_files_to_scan
 from .core.scan import scan_for_allowlisted_secrets_in_file
@@ -19,17 +20,41 @@ from .settings import get_settings
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    if not argv and len(sys.argv) == 1:     # pragma: no cover
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:     # pragma: no cover
         argv = ['--help']
 
-    args = parse_args(argv)
-    if args.verbose:    # pragma: no cover
-        log.set_debug_level(args.verbose)
+    # The snapshot must exist before full argument parsing, because baseline
+    # path validation and content loading run inside the parser's post
+    # processors.
+    snapshot_cm = None
+    snapshot = None
+    if staged.wants_staged(argv):
+        try:
+            snapshot_cm = staged.staged_snapshot(staged.get_workdir_override(argv))
+            snapshot = snapshot_cm.__enter__()
+            staged.set_active_snapshot(snapshot)
+        except staged.StagedSnapshotError as e:
+            print(f'error: {e}', file=sys.stderr)
+            return 1
 
-    if args.action == 'scan':
-        handle_scan_action(args)
-    elif args.action == 'audit':
-        handle_audit_action(args)
+    try:
+        args = parse_args(argv)
+        if args.verbose:    # pragma: no cover
+            log.set_debug_level(args.verbose)
+
+        if args.action == 'scan':
+            handle_scan_action(args)
+        elif args.action == 'audit':
+            handle_audit_action(args)
+    except staged.StagedSnapshotError as e:
+        print(f'error: {e}', file=sys.stderr)
+        return 1
+    finally:
+        staged.set_active_snapshot(None)
+        if snapshot_cm is not None:
+            snapshot_cm.__exit__(None, None, None)
 
     return 0
 
@@ -65,6 +90,36 @@ def handle_scan_action(args: argparse.Namespace) -> None:
                 secrets[secret.filename].add(secret)
 
         print(json.dumps(baseline.format_for_output(secrets), indent=2))
+        return
+
+    if getattr(args, 'staged', False):
+        snapshot = staged.get_active_snapshot()
+        if snapshot is None:
+            raise staged.StagedSnapshotError('staged snapshot is not available')
+
+        occurrence_tracking = bool(
+            getattr(args, 'track_occurrences', False)
+            or getattr(args, 'baseline_is_occurrence_tracked', False),
+        )
+        fingerprint_key = None
+        if occurrence_tracking and args.baseline is not None:
+            fingerprint_key = getattr(args.baseline, 'fingerprint_key', None)
+
+        secrets = staged.create_collection_from_snapshot(
+            snapshot,
+            track_occurrences=occurrence_tracking,
+            fingerprint_key=fingerprint_key,
+            num_processors=args.num_cores,
+        )
+        if occurrence_tracking:
+            from .core.occurrences import capture_evidence
+            from .core.occurrences import mark_tracked
+
+            capture_evidence(secrets)
+            mark_tracked(secrets)
+
+        # --staged never updates files on disk: the fresh baseline goes to stdout.
+        print(json.dumps(baseline.format_for_output(secrets, is_slim_mode=args.slim), indent=2))
         return
 
     occurrence_tracking = bool(

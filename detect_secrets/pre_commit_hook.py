@@ -9,6 +9,7 @@ from typing import Optional
 from detect_secrets.__version__ import VERSION
 from detect_secrets.core import baseline
 from detect_secrets.core import occurrences
+from detect_secrets.core import staged
 from detect_secrets.core.log import log
 from detect_secrets.core.secrets_collection import SecretsCollection
 from detect_secrets.core.usage import ParserBuilder
@@ -17,6 +18,32 @@ from detect_secrets.util import git
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    snapshot_cm = None
+    snapshot = None
+    if staged.wants_staged(argv):
+        try:
+            snapshot_cm = staged.staged_snapshot(staged.get_workdir_override(argv))
+            snapshot = snapshot_cm.__enter__()
+            staged.set_active_snapshot(snapshot)
+        except staged.StagedSnapshotError as e:
+            print(f'error: {e}', file=sys.stderr)
+            return 1
+
+    try:
+        return _main(argv)
+    except staged.StagedSnapshotError as e:
+        print(f'error: {e}', file=sys.stderr)
+        return 1
+    finally:
+        staged.set_active_snapshot(None)
+        if snapshot_cm is not None:
+            snapshot_cm.__exit__(None, None, None)
+
+
+def _main(argv: Optional[List[str]] = None) -> int:
     try:
         args = parse_args(argv)
     except ValueError:
@@ -31,6 +58,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         getattr(args, 'baseline', None)
         and getattr(args.baseline, 'occurrence_tracking', False),
     )
+
+    if getattr(args, 'staged', False):
+        return _run_staged(args, baseline_is_tracked)
+
     secrets = SecretsCollection(
         occurrence_tracking=baseline_is_tracked,
         fingerprint_key=getattr(args.baseline, 'fingerprint_key', None)
@@ -43,6 +74,39 @@ def main(argv: Optional[List[str]] = None) -> int:
     if baseline_is_tracked:
         occurrences.capture_evidence(secrets)
 
+    return _evaluate(args, secrets)
+
+
+def _run_staged(args: argparse.Namespace, baseline_is_tracked: bool) -> int:
+    """
+    Check the frozen index snapshot.  Everything -- including a --baseline file
+    -- was read from indexed blobs during argument parsing, so concurrent
+    ``git add`` calls and working-tree edits cannot influence the result.  This
+    mode only inspects: it never rewrites the baseline or touches the index.
+    """
+    snapshot = staged.get_active_snapshot()
+    if snapshot is None:
+        raise staged.StagedSnapshotError('staged snapshot is not available')
+
+    secrets = staged.create_collection_from_snapshot(
+        snapshot,
+        track_occurrences=baseline_is_tracked,
+        fingerprint_key=getattr(args.baseline, 'fingerprint_key', None)
+        if baseline_is_tracked
+        else None,
+    )
+
+    if baseline_is_tracked:
+        occurrences.capture_evidence(secrets)
+
+    return _evaluate(args, secrets, allow_baseline_updates=False)
+
+
+def _evaluate(
+    args: argparse.Namespace,
+    secrets: SecretsCollection,
+    allow_baseline_updates: bool = True,
+) -> int:
     new_secrets = secrets
     if args.baseline:
         new_secrets = secrets - args.baseline
@@ -55,6 +119,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     if not args.baseline:
+        return 0
+
+    if not allow_baseline_updates:
+        # --staged is inspect-only: never rewrite the baseline file, and never
+        # ask the user to re-stage anything.
         return 0
 
     # Only attempt baseline modifications if we don't find any new secrets.
@@ -91,7 +160,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     :raises: ValueError
     """
     output = ParserBuilder().add_pre_commit_arguments().parse_args(argv)
-    if output.baseline:
+    if output.baseline and not getattr(output, 'staged', False):
+        # In --staged mode the baseline is validated against the snapshot
+        # itself; the working-tree "unstaged" check does not apply.
         raise_exception_if_baseline_file_is_unstaged(output.baseline_filename)
 
     return output

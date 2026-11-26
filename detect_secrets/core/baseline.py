@@ -32,7 +32,7 @@ def create(
     fingerprint_key: Optional[str] = None,
 ) -> SecretsCollection:
     """Scans all the files recursively in path to initialize a baseline."""
-    kwargs = {}
+    kwargs: Dict[str, Any] = {}
     if num_processors:
         kwargs['num_processors'] = num_processors
 

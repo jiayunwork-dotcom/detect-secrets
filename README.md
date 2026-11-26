@@ -164,6 +164,21 @@ Unchanged lines and clean insertions above an occurrence retain prior judgements
 copies, moves, and ambiguous edits receive new, unreviewed occurrence ids instead of inheriting an
 old exemption.
 
+#### Scanning a Fixed Staging-Area Snapshot
+
+`scan --staged` and `detect-secrets-hook --staged` check the exact blob contents in the Git index
+at launch time, so a concurrent `git add`, a working-tree edit, or a working-tree deletion cannot
+change or mix the results. Only stage-0 regular files are scanned; symlinks, submodules, and
+staged deletions are excluded, and unmerged index entries fail with a non-zero status. The new
+baseline is printed to stdout, and hook runs never rewrite the index or working files. See
+[Staging-area snapshots](docs/staged-scanning.md) for details and an offline demo script.
+
+```bash
+$ detect-secrets scan --staged --track-occurrences > .occurrence-baseline.json
+$ git add .occurrence-baseline.json
+$ detect-secrets-hook --staged --baseline .occurrence-baseline.json
+```
+
 ### Usage in Other Python Scripts
 
 **Basic Use:**

@@ -94,11 +94,42 @@ def _add_initialize_baseline_options(parser: argparse.ArgumentParser) -> None:
             'Updating an existing occurrence-tracked baseline with --baseline keeps this format.'
         ),
     )
+    group.add_argument(
+        '--staged',
+        action='store_true',
+        help=(
+            'Scan a fixed snapshot of the Git staging area instead of the working tree. '
+            'All stage-0 regular files staged at launch are scanned from their indexed blob '
+            'contents, so concurrent `git add` calls and working-tree edits or deletions cannot '
+            'change what is checked. The baseline is printed to stdout only.'
+        ),
+    )
 
 
 def parse_args(args: argparse.Namespace) -> None:
     if args.action != 'scan':
         return
+
+    if getattr(args, 'staged', False):
+        if getattr(args, 'string', None):
+            raise argparse.ArgumentTypeError(
+                '--staged cannot be combined with --string: adhoc string scans do not '
+                'operate on Git index contents.',
+            )
+
+        if getattr(args, 'only_allowlisted', False):
+            raise argparse.ArgumentTypeError(
+                '--staged cannot be combined with --only-allowlisted.',
+            )
+
+        # scan --baseline rewrites the baseline file on disk, which is forbidden
+        # in --staged mode (frozen snapshot, stdout-only output).
+        if getattr(args, 'baseline', None) is not None:
+            raise argparse.ArgumentTypeError(
+                '--staged scans always write a fresh baseline to stdout; updating a '
+                'baseline file in place is not supported. Feed the output to '
+                '`detect-secrets-hook --staged --baseline` instead.',
+            )
 
     # NOTE: This is assumed to run *after* the baseline argument processor, and before
     # the plugin argument processor.

@@ -2,6 +2,7 @@ import multiprocessing as mp
 import os
 from collections import defaultdict
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Generator
 from typing import List
@@ -107,10 +108,21 @@ class SecretsCollection:
 
         self.data[relative_filename].add(secret)
 
-    def scan_files(self, *filenames: str, num_processors: Optional[int] = None) -> None:
-        """Just like scan_file, but optimized through parallel processing."""
+    def scan_files(
+        self,
+        *filenames: str,
+        num_processors: Optional[int] = None,
+        remap_filename: Optional[Callable[[str], str]] = None,
+    ) -> None:
+        """Just like scan_file, but optimized through parallel processing.
+
+        :param remap_filename: optional transform applied to each discovered
+            secret's filename and to the collection key. Used by --staged scans
+            to hide the private snapshot directory behind repository-relative
+            names.
+        """
         if len(filenames) == 1:
-            self.scan_file(filenames[0])
+            self.scan_file(filenames[0], remap_filename=remap_filename)
             return
 
         if not num_processors:
@@ -128,12 +140,28 @@ class SecretsCollection:
                 [os.path.join(self.root, filename) for filename in filenames],
             ):
                 for secret in secrets:
-                    relative_filename = os.path.relpath(secret.filename, self.root)
+                    if self.root:
+                        relative_filename = os.path.relpath(secret.filename, self.root)
+                    else:
+                        relative_filename = secret.filename
+
+                    if remap_filename is not None:
+                        relative_filename = remap_filename(secret.filename)
+                        secret.filename = relative_filename
+
                     self.add_scanned_secret(relative_filename, secret)
 
-    def scan_file(self, filename: str) -> None:
+    def scan_file(
+        self,
+        filename: str,
+        remap_filename: Optional[Callable[[str], str]] = None,
+    ) -> None:
         for secret in scan.scan_file(os.path.join(self.root, convert_local_os_path(filename))):
-            self.add_scanned_secret(convert_local_os_path(filename), secret)
+            reported_filename = convert_local_os_path(filename)
+            if remap_filename is not None:
+                reported_filename = remap_filename(secret.filename)
+                secret.filename = reported_filename
+            self.add_scanned_secret(reported_filename, secret)
 
     def scan_diff(self, diff: str) -> None:
         """

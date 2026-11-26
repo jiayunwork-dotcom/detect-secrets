@@ -6,6 +6,22 @@ from ...settings import get_settings
 
 
 def valid_path(path: str) -> str:
+    # In --staged mode, the frozen index snapshot -- not the working tree --
+    # is the source of truth for file existence.  A staged path may have been
+    # deleted or modified on disk after `git add`, so os.path.isfile alone is
+    # not sufficient.
+    from ...core import staged
+
+    snapshot = staged.get_active_snapshot()
+    if snapshot is not None:
+        repo_relative = snapshot.resolve_repo_relative_path(path)
+        if repo_relative is None:
+            raise argparse.ArgumentTypeError(
+                f'Invalid path: {path} (not present in the staged snapshot)',
+            )
+
+        return path
+
     if not os.path.isfile(path):
         raise argparse.ArgumentTypeError(
             f'Invalid path: {path}',

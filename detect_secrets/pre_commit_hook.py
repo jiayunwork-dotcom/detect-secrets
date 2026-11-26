@@ -8,6 +8,7 @@ from typing import Optional
 
 from detect_secrets.__version__ import VERSION
 from detect_secrets.core import baseline
+from detect_secrets.core import occurrences
 from detect_secrets.core.log import log
 from detect_secrets.core.secrets_collection import SecretsCollection
 from detect_secrets.core.usage import ParserBuilder
@@ -24,10 +25,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.verbose:    # pragma: no cover
         log.set_debug_level(args.verbose)
 
-    # Find all secrets in files to be committed
-    secrets = SecretsCollection()
+    # Find all secrets in files to be committed.  For a position-tracked baseline,
+    # scan candidates must use the same HMAC key so continuation evidence compares.
+    baseline_is_tracked = bool(
+        getattr(args, 'baseline', None)
+        and getattr(args.baseline, 'occurrence_tracking', False),
+    )
+    secrets = SecretsCollection(
+        occurrence_tracking=baseline_is_tracked,
+        fingerprint_key=getattr(args.baseline, 'fingerprint_key', None)
+        if baseline_is_tracked
+        else None,
+    )
     for filename in args.filenames:
         secrets.scan_file(filename)
+
+    if baseline_is_tracked:
+        occurrences.capture_evidence(secrets)
 
     new_secrets = secrets
     if args.baseline:

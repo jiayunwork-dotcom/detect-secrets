@@ -1,9 +1,11 @@
 import hashlib
 from typing import Any
+from typing import cast
 from typing import Dict
 from typing import Optional
 from typing import Union
 
+from .occurrences import OccurrenceIdentity
 from ..util.color import AnsiColor
 from ..util.color import colorize
 from ..util.path import convert_local_os_path
@@ -30,6 +32,7 @@ class PotentialSecret:
         line_number: int = 0,
         is_secret: Optional[bool] = None,
         is_verified: bool = False,
+        occurrence: Optional[OccurrenceIdentity] = None,
     ) -> None:
         """
         :param type: human-readable secret type, defined by the plugin
@@ -40,6 +43,7 @@ class PotentialSecret:
             Merely used as a reference for easy triage.
         :param is_secret: whether or not the secret is a true- or false- positive
         :param is_verified: whether the secret has been externally verified
+        :param occurrence: opt-in position-tracking identity and evidence
         """
         self.type = type
         self.filename = filename
@@ -47,10 +51,14 @@ class PotentialSecret:
         self.set_secret(secret)
         self.is_secret = is_secret
         self.is_verified = is_verified
+        self.occurrence = occurrence
 
         # If two PotentialSecrets have the same values for these fields,
         # they are considered equal. Note that line numbers aren't included
         # in this, because line numbers are subject to change.
+        #
+        # When occurrence tracking is enabled, the occurrence id refines this
+        # value identity so that multiple copies in one file remain distinct.
         self.fields_to_compare = ['filename', 'secret_hash', 'type']
 
     def set_secret(self, secret: str) -> None:
@@ -89,6 +97,11 @@ class PotentialSecret:
             if parameter in data:
                 kwargs[parameter] = data[parameter]
 
+        if 'occurrence' in data:
+            kwargs['occurrence'] = OccurrenceIdentity.from_dict(
+                cast(Dict[str, Any], data['occurrence']),
+            )
+
         output = cls(**kwargs)
         output.secret_value = None
         output.secret_hash = str(data['hashed_secret'])
@@ -110,11 +123,29 @@ class PotentialSecret:
         if hasattr(self, 'is_secret') and self.is_secret is not None:
             attributes['is_secret'] = self.is_secret
 
+        if getattr(self, 'occurrence', None) is not None:
+            attributes['occurrence'] = cast(
+                OccurrenceIdentity,
+                self.occurrence,
+            ).to_dict()
+
         return attributes
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, PotentialSecret):
             return NotImplemented
+
+        if (self.occurrence is None) != (other.occurrence is None):
+            return False
+
+        if self.occurrence is not None:
+            return (
+                self.occurrence.id == other.occurrence.id
+                and all(
+                    getattr(self, field) == getattr(other, field)
+                    for field in self.fields_to_compare
+                )
+            )
 
         return all(
             getattr(self, field) == getattr(other, field)
@@ -125,12 +156,13 @@ class PotentialSecret:
         return not self.__eq__(other)
 
     def __hash__(self) -> int:
-        return hash(
-            tuple(
-                getattr(self, x)
-                for x in self.fields_to_compare
-            ),
+        identity = tuple(
+            getattr(self, x)
+            for x in self.fields_to_compare
         )
+        if self.occurrence is not None:
+            identity = identity + (self.occurrence.id,)
+        return hash(identity)
 
     def __str__(self) -> str:
         return (

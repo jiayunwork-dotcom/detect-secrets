@@ -9,6 +9,10 @@ from typing import Optional
 from typing import Union
 
 from . import upgrades
+from .occurrences import capture_evidence
+from .occurrences import MARKER_KEY
+from .occurrences import mark_tracked
+from .occurrences import marker_for_output
 from ..__version__ import VERSION
 from ..exceptions import UnableToReadBaselineError
 from ..settings import configure_settings_from_baseline
@@ -24,17 +28,27 @@ def create(
     should_scan_all_files: bool = False,
     root: str = '',
     num_processors: Optional[int] = None,
+    track_occurrences: bool = False,
+    fingerprint_key: Optional[str] = None,
 ) -> SecretsCollection:
     """Scans all the files recursively in path to initialize a baseline."""
     kwargs = {}
     if num_processors:
         kwargs['num_processors'] = num_processors
 
-    secrets = SecretsCollection(root=root)
+    secrets = SecretsCollection(
+        root=root,
+        occurrence_tracking=track_occurrences,
+        fingerprint_key=fingerprint_key,
+    )
     secrets.scan_files(
         *get_files_to_scan(*paths, should_scan_all_files=should_scan_all_files, root=root),
         **kwargs,
     )
+
+    if track_occurrences:
+        capture_evidence(secrets)
+        mark_tracked(secrets)
 
     return secrets
 
@@ -73,6 +87,9 @@ def format_for_output(secrets: SecretsCollection, is_slim_mode: bool = False) ->
 
         'results': secrets.json(),
     }
+
+    if getattr(secrets, 'occurrence_tracking', False):
+        output[MARKER_KEY] = marker_for_output(secrets)
 
     if not is_slim_mode:
         output['generated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())

@@ -9,6 +9,7 @@ from typing import Optional
 
 from . import io
 from ..core import baseline
+from ..core import occurrences
 from ..core import plugins
 from ..core.potential_secret import PotentialSecret
 from ..core.secrets_collection import SecretsCollection
@@ -106,7 +107,7 @@ def get_raw_secrets_from_file(
             )
 
             for identified_secret in (identified_secrets or []):
-                if identified_secret == secret:
+                if occurrences.same_detected_value(identified_secret, secret):
                     all_secrets.append(identified_secret)
 
         if (

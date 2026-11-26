@@ -145,6 +145,25 @@ ratio.
 $ detect-secrets audit .secrets.baseline
 ```
 
+#### Tracking Individual Occurrences
+
+The default baseline intentionally identifies findings by filename, secret type, and secret hash.
+Consequently, several copies of the same secret in one file can be represented by one result.
+For workflows that need per-copy audit state, see
+[Occurrence-tracked baselines](docs/occurrence-tracking.md). In short:
+
+```bash
+$ detect-secrets scan --track-occurrences > .occurrence-baseline.json
+$ detect-secrets audit .occurrence-baseline.json
+$ detect-secrets scan --baseline .occurrence-baseline.json
+$ detect-secrets-hook --baseline .occurrence-baseline.json <changed files>
+```
+
+This opt-in format stores separate occurrence ids and non-reversible local position evidence.
+Unchanged lines and clean insertions above an occurrence retain prior judgements; indistinguishable
+copies, moves, and ambiguous edits receive new, unreviewed occurrence ids instead of inheriting an
+old exemption.
+
 ### Usage in Other Python Scripts
 
 **Basic Use:**

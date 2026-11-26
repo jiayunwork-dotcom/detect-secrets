@@ -67,11 +67,21 @@ def handle_scan_action(args: argparse.Namespace) -> None:
         print(json.dumps(baseline.format_for_output(secrets), indent=2))
         return
 
+    occurrence_tracking = bool(
+        getattr(args, 'track_occurrences', False)
+        or getattr(args, 'baseline_is_occurrence_tracked', False),
+    )
+    fingerprint_key = None
+    if occurrence_tracking and args.baseline is not None:
+        fingerprint_key = getattr(args.baseline, 'fingerprint_key', None)
+
     secrets = baseline.create(
         *args.path,
         should_scan_all_files=args.all_files,
         root=args.custom_root,
         num_processors=args.num_cores,
+        track_occurrences=occurrence_tracking,
+        fingerprint_key=fingerprint_key,
     )
     if args.baseline is not None:
         # The pre-commit hook's baseline upgrade is to trim the supplied baseline for non-existent

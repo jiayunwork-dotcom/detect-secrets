@@ -85,6 +85,15 @@ def _add_initialize_baseline_options(parser: argparse.ArgumentParser) -> None:
             'slim baselines will need to be remade to be audited.'
         ),
     )
+    group.add_argument(
+        '--track-occurrences',
+        action='store_true',
+        help=(
+            'Create an occurrence-tracked baseline. Multiple same-type/same-hash hits in one '
+            'file are stored separately and reconciled with non-reversible position evidence. '
+            'Updating an existing occurrence-tracked baseline with --baseline keeps this format.'
+        ),
+    )
 
 
 def parse_args(args: argparse.Namespace) -> None:
@@ -96,3 +105,19 @@ def parse_args(args: argparse.Namespace) -> None:
     if args.baseline is not None and args.force_use_all_plugins:
         get_settings().plugins.clear()
         initialize_plugin_settings(args)
+
+    if getattr(args, 'track_occurrences', False) and getattr(args, 'slim', False):
+        raise argparse.ArgumentTypeError(
+            '--track-occurrences cannot be combined with --slim; occurrence baselines '
+            'retain line coordinates for audit and continuation matching.',
+        )
+
+    if (
+        getattr(args, 'track_occurrences', False)
+        and args.baseline is not None
+        and not getattr(args.baseline, 'occurrence_tracking', False)
+    ):
+        raise argparse.ArgumentTypeError(
+            '--track-occurrences cannot migrate a legacy baseline. Create a new '
+            'occurrence-tracked baseline file instead.',
+        )

@@ -30,7 +30,7 @@ def generate_report(
     line_getter_factory: Callable[[str], 'LineGetter'] = open_file,
 ) -> Dict[str, List[Dict[str, Any]]]:
 
-    secrets: Dict[Tuple[str, str], Any] = {}
+    secrets: Dict[Tuple[Any, ...], Any] = {}
     for filename, secret in get_baseline_from_file(baseline_file):
         verified_result = VerifiedResult.from_secret(secret)
         if (
@@ -38,21 +38,32 @@ def generate_report(
             SecretClassToPrint.from_class(verified_result) != class_to_print
         ):
             continue
-        # Removal of the stored line number is required to force the complete file scanning to obtain all the secret occurrences. # noqa: E501
-        secret.line_number = 0
-        detections = get_raw_secrets_from_file(secret)
+
+        occurrence_id = secret.occurrence.id if secret.occurrence is not None else None
+        if occurrence_id is not None:
+            # Occurrence-tracked baselines must report each labelled location
+            # separately. Preserve the line coordinate instead of scanning the
+            # whole file and merging by value hash.
+            detections = get_raw_secrets_from_file(secret)
+            identity_key: Tuple[Any, ...] = ('occurrence', occurrence_id)
+        else:
+            # Removal of the stored line number is required to force the complete file scanning to obtain all the secret occurrences. # noqa: E501
+            secret.line_number = 0
+            detections = get_raw_secrets_from_file(secret)
+            identity_key = (secret.secret_hash, filename)
+
         line_getter = line_getter_factory(filename)
         for detection in detections:
-            if (secret.secret_hash, filename) in secrets:
-                secrets[(secret.secret_hash, filename)]['lines'][detection.line_number] = line_getter.lines[detection.line_number - 1]  # noqa: E501
-                if secret.type not in secrets[(secret.secret_hash, filename)]['types']:
-                    secrets[(secret.secret_hash, filename)]['types'].append(secret.type)
-                secrets[(secret.secret_hash, filename)]['category'] = get_prioritized_verified_result(  # noqa: E501
+            if identity_key in secrets:
+                secrets[identity_key]['lines'][detection.line_number] = line_getter.lines[detection.line_number - 1]  # noqa: E501
+                if secret.type not in secrets[identity_key]['types']:
+                    secrets[identity_key]['types'].append(secret.type)
+                secrets[identity_key]['category'] = get_prioritized_verified_result(  # noqa: E501
                     verified_result,
-                    VerifiedResult[secrets[(secret.secret_hash, filename)]['category']],
+                    VerifiedResult[secrets[identity_key]['category']],
                 ).name
             else:
-                secrets[(secret.secret_hash, filename)] = {
+                entry = {
                     'secrets': detection.secret_value,
                     'filename': filename,
                     'lines': {
@@ -63,6 +74,9 @@ def generate_report(
                     ],
                     'category': verified_result.name,
                 }
+                if occurrence_id is not None:
+                    entry['occurrence_id'] = occurrence_id
+                secrets[identity_key] = entry
     return {
         'results': list(secrets.values()),
     }

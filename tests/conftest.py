@@ -20,6 +20,9 @@ def clear_cache():
     # test pollution issues.
     get_mapping_from_secret_type_to_class.cache_clear()
 
+    # Reset the ambient (process-wide) settings object, and any scope state that
+    # a previous test may have left behind.
+    settings.reset_settings_for_testing()
     settings.get_settings().clear()
     settings.cache_bust()
 

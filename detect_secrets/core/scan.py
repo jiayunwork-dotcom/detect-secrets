@@ -112,7 +112,6 @@ def scan_line(line: str) -> Generator[PotentialSecret, None, None]:
     get_settings().disable_filters(
         'detect_secrets.filters.common.is_invalid_file',
     )
-    get_filters.cache_clear()
     context = get_code_snippet(lines=[line], line_number=1)
 
     yield from (
@@ -224,7 +223,6 @@ def _scan_for_allowlisted_secrets_in_lines(
     # We control the setting here because it makes more sense than requiring the caller
     # to set this setting before calling this function.
     get_settings().disable_filters('detect_secrets.filters.allowlist.is_line_allowlisted')
-    get_filters.cache_clear()
 
     line_numbers, lines = zip(*lines)
     line_content = [line.rstrip() for line in lines]

@@ -1,5 +1,4 @@
 import os
-from functools import lru_cache
 from typing import cast
 
 import requests
@@ -9,7 +8,9 @@ from ..core.plugins import Plugin
 from ..settings import get_settings
 from ..util.code_snippet import CodeSnippet
 from ..util.inject import call_function_with_arguments
-from .util import get_caller_path
+
+_BASELINE_FILE_PATH = f'{__name__}.is_baseline_file'
+_VERIFICATION_POLICY_PATH = f'{__name__}.is_ignored_due_to_verification_policies'
 
 
 def is_invalid_file(filename: str) -> bool:
@@ -20,10 +21,21 @@ def is_baseline_file(filename: str) -> bool:
     return os.path.basename(filename) == _get_baseline_filename()
 
 
-@lru_cache(maxsize=1)
 def _get_baseline_filename() -> str:
-    path = get_caller_path(offset=1)
-    return cast(str, get_settings().filters[path]['filename'])
+    """
+    Resolve the configured basename from the *current* settings scope.
+
+    The memo lives on the settings object (and is cleared whenever its filter
+    config changes), so it can never leak a filename between concurrent scans.
+    """
+    settings = get_settings()
+    return cast(
+        str,
+        settings.get_derived(
+            ('baseline-filename',),
+            lambda: settings.filters[_BASELINE_FILE_PATH]['filename'],
+        ),
+    )
 
 
 def is_ignored_due_to_verification_policies(
@@ -58,7 +70,16 @@ def is_ignored_due_to_verification_policies(
     return False
 
 
-@lru_cache(maxsize=1)
 def _get_verification_policy() -> VerifiedResult:
-    path = get_caller_path(offset=1)
-    return VerifiedResult(get_settings().filters[path]['min_level'])
+    settings = get_settings()
+    return cast(
+        VerifiedResult,
+        settings.get_derived(
+            ('verification-policy',),
+            lambda: VerifiedResult(settings.filters[_VERIFICATION_POLICY_PATH]['min_level']),
+        ),
+    )
+
+
+def clear_caches() -> None:
+    """Backwards-compatible hook; caches are scope owned now."""

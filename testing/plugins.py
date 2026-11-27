@@ -4,7 +4,8 @@ from typing import Any
 from typing import Generator
 
 from detect_secrets.core.plugins import Plugin
-from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_class
+from detect_secrets.core.plugins.util import register_plugin_initializer
+from detect_secrets.core.plugins.util import unregister_plugin_initializer
 from detect_secrets.plugins.base import RegexBasedDetector
 
 
@@ -19,12 +20,12 @@ def register_plugin(plugin: Plugin) -> Generator[None, None, None]:
     # registered plugins, this shimmed function will be known as the underlying plugin class.
     get_instance.__name__ = plugin.__class__.__name__
 
+    register_plugin_initializer(plugin.secret_type, get_instance)
     try:
-        get_mapping_from_secret_type_to_class()[plugin.secret_type] = get_instance  # type: ignore
         yield
     finally:
         # On next run, it should re-initialize to base state.
-        get_mapping_from_secret_type_to_class.cache_clear()
+        unregister_plugin_initializer(plugin.secret_type)
 
 
 class HippoDetector(RegexBasedDetector):

@@ -102,14 +102,22 @@ This is a global configuration object, that can be used to customize your scans 
 environment. With two identical settings, the scan results of the exact same files will result
 in the exact same `SecretsCollection`.
 
-> **Developer Note**: While this is technically a "global" variable, we use Python's `lru_cache`
-  combined with a no-input function, to have better control over it. This allows for a singleton
-  pattern with easy cleanup, so test pollution is reduced (see `tests.conftest.clear_cache`). This
-  pattern is also frequently used around the codebase.
+> **Developer Note**: The settings object is *scoped to the execution context*
+> rather than being a process-wide singleton. `get_settings()` returns the
+> `Settings` bound to the current thread / asyncio task through a
+> `contextvars.ContextVar`, and `transient_settings` installs a fresh object for
+> the duration of a `with` block, restoring the previous one on exit. This keeps
+> concurrent scans (threads or interleaved tasks) from clobbering each other's
+> configuration, and makes nested scopes, exceptions and task cancellation safe.
+> See [scoped-settings.md](scoped-settings.md) for the full design.
 >
-> Though this is a singleton object (which generally requires some care when deciding when to
-  write to said object), as soon as the scan begins, all plugins and filters are initialized
-  and cached. This essentially makes the configured settings a `frozendict` during execution.
+> Plugin instances, filter functions and configuration-derived filter artefacts
+> (compiled regexes, word-list automatons, baseline filename, verification
+> policy) are cached on the `Settings` object they came from, so changing the
+> configuration both changes actual filtering behaviour and the serialized
+> policy in the baseline. Expensive, immutable artefacts that depend only on
+> their inputs are additionally shared through content-keyed caches. Test
+> pollution is still reduced via `tests.conftest.clear_cache`.
 
 As of version 1.0, the `Settings` object is responsible for:
 
